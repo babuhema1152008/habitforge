@@ -7,6 +7,17 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { supabase } from '@/lib/supabaseClient';
 import { DEMO_EMAIL, DEMO_PASSWORD } from '@/lib/demoAccount';
 
+function friendlyAuthError(err: unknown): string {
+  const message = err instanceof Error ? err.message : '';
+  if (/rate limit/i.test(message)) {
+    return "Too many attempts right now — Supabase's email sending has a rate limit. If you're the project owner, turning off \"Confirm email\" under Authentication → Providers → Email removes this limit entirely (no email is sent). Otherwise, wait a few minutes and try again.";
+  }
+  if (/email not confirmed/i.test(message)) {
+    return 'This account still needs email confirmation. Check your inbox, or ask the project owner to disable "Confirm email" in Supabase.';
+  }
+  return message || 'Something went wrong. Please try again.';
+}
+
 export function Auth() {
   const [params, setParams] = useSearchParams();
   const mode = params.get('mode') === 'login' ? 'login' : 'signup';
@@ -60,7 +71,7 @@ export function Auth() {
       }
       navigate('/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setError(friendlyAuthError(err));
     } finally {
       setSubmitting(false);
     }
@@ -82,7 +93,7 @@ export function Auth() {
       }
       navigate('/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start the demo. Please try again.');
+      setError(friendlyAuthError(err));
     } finally {
       setSubmitting(false);
     }
