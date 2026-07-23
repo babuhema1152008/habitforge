@@ -1,16 +1,30 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import type { AuthError } from '@supabase/supabase-js';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { supabase } from '@/lib/supabaseClient';
 import { DEMO_EMAIL, DEMO_PASSWORD } from '@/lib/demoAccount';
 
+const COOLDOWN_MS = 60_000;
+
+function isRateLimitError(err: unknown): boolean {
+  const authErr = err as Partial<AuthError> | undefined;
+  return authErr?.status === 429 || /rate limit/i.test(authErr?.message ?? '');
+}
+
+/** True only for "this account doesn't exist / wrong credentials" — the one case worth retrying as a signup. */
+function looksLikeMissingAccount(err: unknown): boolean {
+  const authErr = err as Partial<AuthError> | undefined;
+  return authErr?.status === 400 && /invalid login credentials/i.test(authErr?.message ?? '');
+}
+
 function friendlyAuthError(err: unknown): string {
   const message = err instanceof Error ? err.message : '';
-  if (/rate limit/i.test(message)) {
-    return "Too many attempts right now — Supabase's email sending has a rate limit. If you're the project owner, turning off \"Confirm email\" under Authentication → Providers → Email removes this limit entirely (no email is sent). Otherwise, wait a few minutes and try again.";
+  if (isRateLimitError(err)) {
+    return "Too many attempts right now — Supabase is rate-limiting auth requests on this project. Wait a minute before trying again. If you're the project owner, check Authentication → Rate Limits in your Supabase dashboard.";
   }
   if (/email not confirmed/i.test(message)) {
     return 'This account still needs email confirmation. Check your inbox, or ask the project owner to disable "Confirm email" in Supabase.';
@@ -29,8 +43,23 @@ export function Auth() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [cooldownSecondsLeft, setCooldownSecondsLeft] = useState(0);
 
   const isSignup = mode === 'signup';
+  const inCooldown = cooldownUntil !== null && cooldownSecondsLeft > 0;
+
+  useEffect(() => {
+    if (cooldownUntil === null) return;
+    const tick = () => {
+      const secondsLeft = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownSecondsLeft(secondsLeft);
+      if (secondsLeft === 0) setCooldownUntil(null);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
 
   function switchMode(next: 'login' | 'signup') {
     setParams({ mode: next });
@@ -42,6 +71,7 @@ export function Auth() {
     e.preventDefault();
     setError('');
     setInfo('');
+    if (inCooldown) return;
     if (!email.trim() || !password.trim() || (isSignup && !name.trim())) {
       setError('Please fill in every field.');
       return;
@@ -71,6 +101,7 @@ export function Auth() {
       }
       navigate('/dashboard');
     } catch (err) {
+      if (isRateLimitError(err)) setCooldownUntil(Date.now() + COOLDOWN_MS);
       setError(friendlyAuthError(err));
     } finally {
       setSubmitting(false);
@@ -80,10 +111,15 @@ export function Auth() {
   async function handleDemo() {
     setError('');
     setInfo('');
+    if (inCooldown) return;
     setSubmitting(true);
     try {
       const { error: signInError } = await supabase.auth.signInWithPassword({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
       if (signInError) {
+        // Only try creating the account for "doesn't exist yet" — retrying with
+        // signUp on a rate-limit (or any other) error just doubles up requests
+        // against the same limited endpoint and prolongs the cooldown.
+        if (!looksLikeMissingAccount(signInError)) throw signInError;
         const { error: signUpError } = await supabase.auth.signUp({
           email: DEMO_EMAIL,
           password: DEMO_PASSWORD,
@@ -93,6 +129,7 @@ export function Auth() {
       }
       navigate('/dashboard');
     } catch (err) {
+      if (isRateLimitError(err)) setCooldownUntil(Date.now() + COOLDOWN_MS);
       setError(friendlyAuthError(err));
     } finally {
       setSubmitting(false);
@@ -197,9 +234,14 @@ export function Auth() {
                 {info}
               </p>
             )}
+            {inCooldown && (
+              <p role="status" className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                Rate-limited — you can try again in {cooldownSecondsLeft}s.
+              </p>
+            )}
 
-            <Button type="submit" fullWidth size="lg" disabled={submitting}>
-              {submitting ? 'Please wait…' : isSignup ? 'Create Account' : 'Log In'}
+            <Button type="submit" fullWidth size="lg" disabled={submitting || inCooldown}>
+              {submitting ? 'Please wait…' : inCooldown ? `Try again in ${cooldownSecondsLeft}s` : isSignup ? 'Create Account' : 'Log In'}
             </Button>
           </form>
 
@@ -209,8 +251,8 @@ export function Auth() {
             <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
           </div>
 
-          <Button variant="outline" fullWidth onClick={handleDemo} disabled={submitting}>
-            🚀 Try the Demo (no signup)
+          <Button variant="outline" fullWidth onClick={handleDemo} disabled={submitting || inCooldown}>
+            {inCooldown ? `Try again in ${cooldownSecondsLeft}s` : '🚀 Try the Demo (no signup)'}
           </Button>
 
           <p className="mt-4 text-center text-[11px] text-slate-400 dark:text-slate-500">
