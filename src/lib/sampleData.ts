@@ -7,8 +7,8 @@ import { CHALLENGE_TEMPLATES } from '@/lib/challengeTemplates';
 const ALL_DAYS: Habit['targetDays'] = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS: Habit['targetDays'] = [1, 2, 3, 4, 5];
 
-function makeHabit(partial: Omit<Habit, 'id' | 'archived'>): Habit {
-  return { id: generateId('habit'), archived: false, ...partial };
+function makeHabit(partial: Omit<Habit, 'id' | 'archived' | 'updatedAt'>): Habit {
+  return { id: generateId(), archived: false, updatedAt: new Date(`${partial.createdAt}T00:00:00`).toISOString(), ...partial };
 }
 
 export function createSampleState(): AppState {
@@ -89,6 +89,7 @@ export function createSampleState(): AppState {
             completed: true,
             xpAwarded: xpForCompletion(streakSoFar),
             completedAt: new Date(`${cursor}T09:00:00`).toISOString(),
+            updatedAt: new Date(`${cursor}T09:00:00`).toISOString(),
           };
         }
       }
@@ -106,6 +107,7 @@ export function createSampleState(): AppState {
     completed: true,
     xpAwarded: xpForCompletion(computeHabitStreak(habits[0], logs, addDays(today, -1)) + 1),
     completedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   logs[exerciseKey] = {
     habitId: habits[1].id,
@@ -113,12 +115,13 @@ export function createSampleState(): AppState {
     completed: true,
     xpAwarded: xpForCompletion(computeHabitStreak(habits[1], logs, addDays(today, -1)) + 1),
     completedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
   const totalXp = Object.values(logs).reduce((sum, l) => sum + (l.completed ? l.xpAwarded : 0), 0);
 
   const user: UserProfile = {
-    id: generateId('user'),
+    id: generateId(),
     name: 'Alex Rivera',
     email: 'alex@example.com',
     avatarColor: '#4f46e5',
@@ -131,7 +134,7 @@ export function createSampleState(): AppState {
 
   const challenges: Challenge[] = [
     {
-      id: generateId('challenge'),
+      id: generateId(),
       title: CHALLENGE_TEMPLATES[0].title,
       description: CHALLENGE_TEMPLATES[0].description,
       emoji: CHALLENGE_TEMPLATES[0].emoji,
@@ -143,9 +146,10 @@ export function createSampleState(): AppState {
       badgeEmoji: CHALLENGE_TEMPLATES[0].badgeEmoji,
       completedAt: null,
       joined: true,
+      updatedAt: new Date(`${addDays(today, -6)}T00:00:00`).toISOString(),
     },
     {
-      id: generateId('challenge'),
+      id: generateId(),
       title: CHALLENGE_TEMPLATES[1].title,
       description: CHALLENGE_TEMPLATES[1].description,
       emoji: CHALLENGE_TEMPLATES[1].emoji,
@@ -157,6 +161,7 @@ export function createSampleState(): AppState {
       badgeEmoji: CHALLENGE_TEMPLATES[1].badgeEmoji,
       completedAt: null,
       joined: true,
+      updatedAt: new Date(`${addDays(today, -10)}T00:00:00`).toISOString(),
     },
   ];
 
@@ -174,5 +179,6 @@ export function createSampleState(): AppState {
     },
     lastCelebratedPerfectDay: null,
     coachState: { celebratedMilestones: {} },
+    syncQueue: [],
   };
 }

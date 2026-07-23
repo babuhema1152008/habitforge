@@ -19,6 +19,7 @@ export function Profile() {
   const [name, setName] = useState(state.user.name);
   const [email, setEmail] = useState(state.user.email);
   const [saved, setSaved] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   function handleSaveProfile(e: FormEvent) {
     e.preventDefault();
@@ -37,9 +38,13 @@ export function Profile() {
     navigate('/');
   }
 
-  function handleReset() {
-    if (window.confirm('Reset to fresh demo data? This replaces your current habits, logs, and XP.')) {
-      resetDemo();
+  async function handleReset() {
+    if (!window.confirm('Reset to fresh demo data? This replaces your current habits, logs, and XP everywhere it has synced.')) return;
+    setResetting(true);
+    try {
+      await resetDemo();
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -135,12 +140,12 @@ export function Profile() {
               <Button variant="outline" onClick={handleExport}>
                 ⬇ Export Progress as CSV
               </Button>
-              <Button variant="outline" onClick={handleReset}>
-                ↺ Reset to Demo Data
+              <Button variant="outline" onClick={handleReset} disabled={resetting}>
+                {resetting ? 'Resetting…' : '↺ Reset to Demo Data'}
               </Button>
             </div>
             <p className="mt-3 text-xs text-slate-400">
-              All data lives in your browser's local storage. Exporting downloads a CSV of every habit completion.
+              Your data syncs to your account and is cached locally so the app keeps working offline. Exporting downloads a CSV of every habit completion.
             </p>
           </Card>
         </div>

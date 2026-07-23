@@ -1,8 +1,8 @@
 # HabitForge 🔥
 
-A clean, modern, production-ready habit tracking SaaS. Built with **React + TypeScript + Tailwind CSS + Framer Motion + Recharts**, following a strict product-definition framework: one core function (mark a habit done in under 3 seconds), one reward loop (streaks, XP, levels, badges), and exactly six pages.
+A clean, modern, production-ready habit tracking SaaS. Built with **React + TypeScript + Tailwind CSS + Framer Motion + Recharts + Supabase**, following a strict product-definition framework: one core function (mark a habit done in under 3 seconds), one reward loop (streaks, XP, levels, badges), and exactly six pages.
 
-Live data lives entirely in the browser's `localStorage` — no backend, no signup friction, works offline. The persistence layer (`src/lib/storage.ts`) is a thin wrapper so it can be swapped for a real API later without touching any component.
+Real accounts and data live in **Supabase** (Postgres + Auth), but the app is **offline-first**: every read renders from a local cache (`localStorage`), every mutation applies instantly and optimistically, and a background sync engine pushes queued changes to Supabase and pulls remote changes down whenever you're online. Lose your connection mid-session and the app keeps working exactly the same — see [§7](#7-offline-first-sync-architecture) for how.
 
 ---
 
@@ -35,26 +35,34 @@ Live data lives entirely in the browser's `localStorage` — no backend, no sign
 - **Recharts** — completion trend area chart, category breakdown pie chart
 - **React Router v6** — client-side routing + protected routes
 - **Vite** — build tooling
-- **localStorage** — persistence (see schema below for the SQL-equivalent shape)
+- **Supabase** — Postgres database, Auth (email/password), Row Level Security
+- **localStorage** — offline-first local cache + queued-mutation outbox (`src/lib/sync/`)
 
 ---
 
 ## 3. Setup Instructions
 
-```bash
-npm install
-npm run dev
-```
+1. **Create a Supabase project** at [supabase.com](https://supabase.com) (or use an existing one).
+2. **Run the migration once**: open your project's Dashboard → SQL Editor → New query, paste the contents of [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql), and run it. This creates all 5 tables, RLS policies, and the auto-profile trigger.
+3. **Check your Auth settings**: Dashboard → Authentication → Providers → Email. If "Confirm email" is enabled, new signups (including the first "Try the Demo" click) will need to click a confirmation link before they can log in. For the smoothest local/dev experience, consider turning it off; for a real deployment, leave it on.
+4. **Configure environment variables**:
+   ```bash
+   cp .env.example .env
+   ```
+   Fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` from Dashboard → Project Settings → API (the anon/publishable key — never the service role key, and the app never needs your database password).
+5. **Install and run**:
+   ```bash
+   npm install
+   npm run dev
+   ```
 
-Open `http://localhost:5173`. Click **"🚀 Try the Demo"** on the auth screen to sign in instantly with pre-seeded sample data (5 habits, ~25 days of history, an active and a completed challenge, several unlocked achievements).
+Open `http://localhost:5173`. Click **"🚀 Try the Demo"** on the auth screen to sign into a real, shared, pre-seeded Supabase account (5 habits, ~25 days of history, an active and a completed challenge, several unlocked achievements) — no signup form required. Its credentials are fixed in `src/lib/demoAccount.ts`; anyone can log into it and "Reset to Demo Data" on the Profile page resets it for everyone.
 
 ```bash
 npm run build     # type-check + production build to dist/
 npm run preview   # preview the production build locally
 npm run lint      # ESLint
 ```
-
-No environment variables or backend services are required.
 
 ---
 
@@ -69,9 +77,15 @@ src/
 ├── types/index.ts            # All domain types (Habit, HabitLog, Challenge, UserProfile, ...)
 │
 ├── lib/                      # Pure logic — no React, fully unit-testable
-│   ├── storage.ts            # localStorage get/set wrapper (swap point for a real API)
+│   ├── supabaseClient.ts     # createClient(), reads VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
+│   ├── demoAccount.ts        # Fixed credentials for the shared "Try the Demo" account
+│   ├── storage.ts            # localStorage get/set wrapper (the offline cache)
+│   ├── sync/                 # Offline-first sync engine — see §7
+│   │   ├── mappers.ts        # camelCase app types ⇄ snake_case DB rows
+│   │   ├── syncEngine.ts     # flush() / pullAll() / reseedRemote()
+│   │   └── merge.ts          # last-write-wins merge (pending-outbox-wins) helpers
 │   ├── date.ts                # ISO date helpers, month-grid generator, weekday labels
-│   ├── id.ts                  # ID generator
+│   ├── id.ts                  # UUID generator (crypto.randomUUID())
 │   ├── categories.ts          # Habit category metadata (emoji, color, label)
 │   ├── gamification.ts        # XP curve, level curve, streak math, achievement defs
 │   ├── challengeTemplates.ts  # 7/21/30-day challenge template definitions
@@ -81,7 +95,8 @@ src/
 │   └── sampleData.ts          # Demo seed data generator
 │
 ├── context/                  # React state (all via useReducer + Context, no external store)
-│   ├── AppProvider.tsx        # Single source of truth: habits, logs, challenges, XP, achievements
+│   ├── AppProvider.tsx        # Single source of truth: habits, logs, challenges, XP, achievements,
+│   │                          # Supabase auth session, and the sync queue
 │   ├── ThemeProvider.tsx      # Light/dark mode, persisted + respects OS preference
 │   └── ToastProvider.tsx      # XP / achievement / success toast notifications
 │
@@ -147,76 +162,105 @@ main.tsx
 
 ## 6. Database Schema
 
-The app currently persists a single JSON blob to `localStorage` (see `AppState` in `src/types/index.ts`). It is modeled directly on these relational tables so swapping in Postgres/Supabase later is a straight mapping — replace `src/lib/storage.ts` and the dispatch calls in `AppProvider.tsx` with API calls; component code doesn't change.
+Real Postgres tables in Supabase — the full migration lives at [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql); this is a summary. Every table has Row Level Security enabled with a policy scoped to `auth.uid()`, so a user can only ever read/write their own rows.
 
 ```sql
-CREATE TABLE users (
-  id               UUID PRIMARY KEY,
-  name             TEXT NOT NULL,
-  email            TEXT UNIQUE NOT NULL,
-  avatar_emoji     TEXT NOT NULL,
-  avatar_color     TEXT NOT NULL,
-  xp               INTEGER NOT NULL DEFAULT 0,
-  level            INTEGER NOT NULL DEFAULT 1,
-  best_overall_streak INTEGER NOT NULL DEFAULT 0,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+-- 1:1 with auth.users, auto-created by a trigger on signup
+CREATE TABLE profiles (
+  id                       UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  name                     TEXT NOT NULL DEFAULT '',
+  avatar_emoji             TEXT NOT NULL DEFAULT '🦊',
+  avatar_color             TEXT NOT NULL DEFAULT '#4f46e5',
+  xp                       INTEGER NOT NULL DEFAULT 0,
+  level                    INTEGER NOT NULL DEFAULT 1,
+  best_overall_streak      INTEGER NOT NULL DEFAULT 0,
+  settings                 JSONB NOT NULL DEFAULT '{"theme":"light","weekStartsOn":0,"reminderNotesEnabled":true}',
+  coach_state              JSONB NOT NULL DEFAULT '{"celebratedMilestones":{}}',
+  last_celebrated_perfect_day DATE,
+  is_demo                  BOOLEAN NOT NULL DEFAULT false,
+  created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE habits (
-  id             UUID PRIMARY KEY,
-  user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name           TEXT NOT NULL,
   emoji          TEXT NOT NULL,
   category       TEXT NOT NULL, -- health | fitness | mindfulness | productivity | learning | finance | social | other
   color          TEXT NOT NULL,
   target_days    SMALLINT[] NOT NULL, -- 0=Sun .. 6=Sat
-  reminder_time  TIME NULL,
-  notes          TEXT NULL,
+  reminder_time  TIME,
+  notes          TEXT,
   archived       BOOLEAN NOT NULL DEFAULT false,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at     TIMESTAMPTZ -- soft-delete tombstone, for offline sync
 );
 
 CREATE TABLE habit_logs (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   habit_id     UUID NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+  user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   date         DATE NOT NULL,
-  completed    BOOLEAN NOT NULL,
-  note         TEXT NULL,
+  completed    BOOLEAN NOT NULL DEFAULT false,
+  note         TEXT,
   xp_awarded   INTEGER NOT NULL DEFAULT 0,
-  completed_at TIMESTAMPTZ NOT NULL,
-  PRIMARY KEY (habit_id, date)
+  completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (habit_id, date)
 );
 
+-- habit_ids kept as an array column rather than a join table — simpler to sync
 CREATE TABLE challenges (
-  id             UUID PRIMARY KEY,
-  user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   title          TEXT NOT NULL,
   description    TEXT NOT NULL,
   emoji          TEXT NOT NULL,
   template_id    TEXT NOT NULL, -- '7-day' | '21-day' | '30-day' | 'custom'
   duration_days  INTEGER NOT NULL,
   start_date     DATE NOT NULL,
-  xp_reward      INTEGER NOT NULL,
+  habit_ids      UUID[] NOT NULL DEFAULT '{}',
+  xp_reward      INTEGER NOT NULL DEFAULT 0,
   badge_emoji    TEXT NOT NULL,
-  completed_at   TIMESTAMPTZ NULL
-);
-
-CREATE TABLE challenge_habits ( -- many-to-many: which habits count toward a challenge
-  challenge_id UUID NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
-  habit_id     UUID NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
-  PRIMARY KEY (challenge_id, habit_id)
+  completed_at   TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at     TIMESTAMPTZ
 );
 
 CREATE TABLE achievements (
   id           TEXT NOT NULL,      -- static achievement definition id, e.g. 'week-warrior'
-  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  unlocked_at  TIMESTAMPTZ NOT NULL,
+  user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  unlocked_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (id, user_id)
 );
 ```
 
 ---
 
-## 7. UI Wireframe Descriptions
+## 7. Offline-First Sync Architecture
+
+The local cache is the source of truth for rendering; Supabase is the source of truth for persistence across devices. `src/lib/sync/`:
+
+- **`mappers.ts`** — converts between the app's camelCase types and Postgres's snake_case rows.
+- **`syncEngine.ts`** — `flush(queue)` pushes queued tasks to Supabase in order (stopping at the first failure to preserve ordering); `pullAll(userId)` fetches every row for a user; `reseedRemote(userId, data)` wipes and re-inserts a user's data (used by "Reset to Demo Data").
+- **`merge.ts`** — the last-write-wins merge rule: `mergeEntities`/`mergeKeyed` take local state, a freshly pulled remote snapshot, and the set of ids still sitting in the local outbox — anything with a pending outbox entry keeps the local version (it hasn't reached the server yet); everything else takes the remote version.
+
+Wired into `AppProvider.tsx`:
+
+1. Every mutation (`toggleLog`, `addHabit`, `createCustomChallenge`, …) updates local state immediately (so the UI never waits on the network) and appends a `SyncTask` to `AppState.syncQueue`, which persists to `localStorage` right alongside everything else — so the outbox survives a reload while offline.
+2. A queue-flush runs after every mutation, on browser `online` events, and on a 30s interval as a fallback. It pushes tasks via `.upsert()` (or a soft-delete upsert with `deleted_at` set, for habit/challenge deletion) and dequeues whatever succeeded.
+3. On reconnect, a full `pullAll` + merge also runs, so changes made on another device show up here.
+4. A small sync-status indicator (`SyncStatusBadge`, in the sidebar / mobile header) shows **Synced** / **Syncing…** / **Offline — will sync** / **Sync issue — retrying**.
+5. Profile-shaped fields (XP, level, settings, coach state, avatar, …) are coalesced into a single debounced `profiles` upsert by one `useEffect`, rather than every action-creator remembering to push one.
+
+**Explicit scope limit:** conflict resolution is last-write-wins, not CRDTs — correct and simple for one person using this on a couple of devices, not built for concurrent multi-user editing of the same row. There's no Realtime subscription in v1 (sync is pull-on-reconnect/interval, not push-on-change from the server) — a natural next step via `supabase.channel(...).on('postgres_changes', ...)` without any schema changes.
+
+---
+
+## 8. UI Wireframe Descriptions
 
 **Landing (`/`)** — Sticky nav (logo, theme toggle, login/signup). Hero: two-column layout with headline + CTA buttons on the left, a live-looking dashboard preview card (progress bar + 5-habit checklist) on the right. Below: 6-item feature grid, 3-card testimonial row, gradient CTA band, footer.
 
@@ -232,7 +276,7 @@ CREATE TABLE achievements (
 
 ---
 
-## 8. AI Habit Coach ("Coach Nova")
+## 9. AI Habit Coach ("Coach Nova")
 
 A rule-based motivational engine (`src/lib/coach.ts`) that reads your local habit/streak/challenge data and produces a prioritized feed of coach messages — no external API calls, fully deterministic from app state. It surfaces in two places:
 
@@ -256,7 +300,7 @@ Message types, highest priority first:
 
 ---
 
-## 9. Gamification Rules
+## 10. Gamification Rules
 
 - **XP per completion:** 10 base, +5 at a 3-day streak, +15 at 7 days, +20 at 21 days, +25 at 30 days (per habit, recalculated on every toggle).
 - **Perfect day bonus:** +30 XP once per day when 100% of that day's scheduled habits are complete (reversed if you undo down from 100%).
@@ -267,7 +311,7 @@ Message types, highest priority first:
 
 ---
 
-## 10. Sample Data
+## 11. Sample Data
 
 Selecting "Try the Demo" or leaving "Start with sample habits" checked on signup seeds:
 
@@ -280,7 +324,7 @@ See `src/lib/sampleData.ts`.
 
 ---
 
-## 11. Accessibility & States
+## 12. Accessibility & States
 
 - Every interactive control has an `aria-label`/`aria-pressed` where appropriate; modals are proper `role="dialog"` with focus-visible rings (`focus-ring` utility) and Escape-to-close.
 - Empty states (`EmptyState`), loading skeletons (`Skeleton`, `HabitCardSkeleton`), and inline form error messages (`role="alert"`) are used throughout instead of blank screens or silent failures.

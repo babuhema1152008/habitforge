@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { NAV_ITEMS } from '@/components/layout/navItems';
 import { Avatar } from '@/components/ui/Avatar';
+import { SyncStatusBadge } from '@/components/ui/SyncStatusBadge';
 import { useApp } from '@/context/AppProvider';
 
 export function Sidebar() {
@@ -40,6 +41,7 @@ export function Sidebar() {
             <p className="text-xs text-slate-500 dark:text-slate-400">Level {levelProgress.level}</p>
           </div>
         </div>
+        <SyncStatusBadge className="px-1" />
         <button
           onClick={signOut}
           className="focus-ring w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"

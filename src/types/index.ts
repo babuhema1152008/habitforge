@@ -27,6 +27,8 @@ export interface Habit {
   category: HabitCategory;
   color: string;
   createdAt: string; // ISO date
+  updatedAt: string; // ISO timestamp — used for last-write-wins sync
+  deletedAt?: string | null; // soft-delete tombstone, for sync
   reminderTime?: string; // 'HH:MM', UI-only, no real notifications
   notes?: string;
   archived: boolean;
@@ -43,6 +45,7 @@ export interface HabitLog {
   note?: string;
   xpAwarded: number;
   completedAt: string; // ISO timestamp
+  updatedAt: string; // ISO timestamp — used for last-write-wins sync
 }
 
 export interface Achievement {
@@ -68,6 +71,8 @@ export interface Challenge {
   badgeEmoji: string;
   completedAt: string | null;
   joined: boolean;
+  updatedAt: string; // ISO timestamp — used for last-write-wins sync
+  deletedAt?: string | null; // soft-delete tombstone, for sync
 }
 
 export interface UserProfile {
@@ -95,6 +100,18 @@ export interface CoachState {
   celebratedMilestones: Record<string, number[]>;
 }
 
+export type SyncTable = 'profiles' | 'habits' | 'habit_logs' | 'challenges' | 'achievements';
+
+/** A queued mutation waiting to be pushed to Supabase. Persisted locally so it survives reloads while offline. */
+export interface SyncTask {
+  id: string;
+  table: SyncTable;
+  op: 'upsert' | 'delete';
+  /** Row payload (already in snake_case DB shape) for 'upsert'; just the row id for 'delete'. */
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface AppState {
   isAuthenticated: boolean;
   user: UserProfile;
@@ -105,6 +122,7 @@ export interface AppState {
   settings: Settings;
   lastCelebratedPerfectDay: string | null; // 'YYYY-MM-DD'
   coachState: CoachState;
+  syncQueue: SyncTask[];
 }
 
 export type CoachMessageType =

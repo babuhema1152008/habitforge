@@ -4,6 +4,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileTabBar } from '@/components/layout/MobileTabBar';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { Avatar } from '@/components/ui/Avatar';
+import { SyncStatusBadge } from '@/components/ui/SyncStatusBadge';
 import { CoachWidget } from '@/components/coach/CoachWidget';
 import { useApp } from '@/context/AppProvider';
 
@@ -20,9 +21,12 @@ export function AppShell() {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-slate-200/70 bg-white/80 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-surface-dark/80 md:hidden">
-          <div className="flex items-center gap-2 text-base font-extrabold tracking-tight text-slate-800 dark:text-slate-100">
-            <span aria-hidden="true">🔥</span>
-            HabitForge
+          <div>
+            <div className="flex items-center gap-2 text-base font-extrabold tracking-tight text-slate-800 dark:text-slate-100">
+              <span aria-hidden="true">🔥</span>
+              HabitForge
+            </div>
+            <SyncStatusBadge className="mt-0.5" />
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />

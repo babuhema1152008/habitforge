@@ -1,3 +1,4 @@
-export function generateId(prefix = 'id'): string {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+/** Real UUIDs so client-generated records map 1:1 onto Supabase primary keys with no remapping. */
+export function generateId(): string {
+  return crypto.randomUUID();
 }

@@ -27,7 +27,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const push = useCallback((toast: Omit<ToastMessage, 'id'>) => {
-    const id = generateId('toast');
+    const id = generateId();
     setToasts((prev) => [...prev, { ...toast, id }]);
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));

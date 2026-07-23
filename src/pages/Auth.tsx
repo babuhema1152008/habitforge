@@ -4,44 +4,88 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
-import { useApp } from '@/context/AppProvider';
+import { supabase } from '@/lib/supabaseClient';
+import { DEMO_EMAIL, DEMO_PASSWORD } from '@/lib/demoAccount';
 
 export function Auth() {
   const [params, setParams] = useSearchParams();
   const mode = params.get('mode') === 'login' ? 'login' : 'signup';
   const navigate = useNavigate();
-  const { signIn } = useApp();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [seedSample, setSeedSample] = useState(true);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const isSignup = mode === 'signup';
 
   function switchMode(next: 'login' | 'signup') {
     setParams({ mode: next });
     setError('');
+    setInfo('');
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    setError('');
+    setInfo('');
     if (!email.trim() || !password.trim() || (isSignup && !name.trim())) {
       setError('Please fill in every field.');
       return;
     }
-    if (password.length < 4) {
-      setError('Password must be at least 4 characters.');
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
       return;
     }
-    signIn(name.trim() || email.split('@')[0], email.trim(), isSignup ? seedSample : true);
-    navigate('/dashboard');
+
+    setSubmitting(true);
+    try {
+      if (isSignup) {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { name: name.trim() } },
+        });
+        if (signUpError) throw signUpError;
+        if (!data.session) {
+          setInfo("Account created — check your email to confirm it, then log in.");
+          setSubmitting(false);
+          return;
+        }
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (signInError) throw signInError;
+      }
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleDemo() {
-    signIn('Demo User', 'demo@habitforge.app', true);
-    navigate('/dashboard');
+  async function handleDemo() {
+    setError('');
+    setInfo('');
+    setSubmitting(true);
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
+      if (signInError) {
+        const { error: signUpError } = await supabase.auth.signUp({
+          email: DEMO_EMAIL,
+          password: DEMO_PASSWORD,
+          options: { data: { name: 'Demo User' } },
+        });
+        if (signUpError) throw signUpError;
+      }
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start the demo. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -132,26 +176,19 @@ export function Auth() {
               />
             </div>
 
-            {isSignup && (
-              <label className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={seedSample}
-                  onChange={(e) => setSeedSample(e.target.checked)}
-                  className="focus-ring h-4 w-4 rounded border-slate-300 text-brand-600"
-                />
-                Start with sample habits &amp; demo progress
-              </label>
-            )}
-
             {error && (
               <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
                 {error}
               </p>
             )}
+            {info && (
+              <p role="status" className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 dark:bg-sky-500/10 dark:text-sky-400">
+                {info}
+              </p>
+            )}
 
-            <Button type="submit" fullWidth size="lg">
-              {isSignup ? 'Create Account' : 'Log In'}
+            <Button type="submit" fullWidth size="lg" disabled={submitting}>
+              {submitting ? 'Please wait…' : isSignup ? 'Create Account' : 'Log In'}
             </Button>
           </form>
 
@@ -161,12 +198,12 @@ export function Auth() {
             <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
           </div>
 
-          <Button variant="outline" fullWidth onClick={handleDemo}>
+          <Button variant="outline" fullWidth onClick={handleDemo} disabled={submitting}>
             🚀 Try the Demo (no signup)
           </Button>
 
           <p className="mt-4 text-center text-[11px] text-slate-400 dark:text-slate-500">
-            This is a local demo — data is stored only in your browser, no account is created on a server.
+            Real accounts, backed by Supabase — your data syncs across devices and keeps working offline.
           </p>
         </Card>
       </motion.div>
