@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { supabase } from '@/lib/supabaseClient';
 import { DEMO_EMAIL, DEMO_PASSWORD } from '@/lib/demoAccount';
+import { useApp } from '@/context/AppProvider';
 
 const COOLDOWN_MS = 60_000;
 
@@ -36,6 +37,7 @@ export function Auth() {
   const [params, setParams] = useSearchParams();
   const mode = params.get('mode') === 'login' ? 'login' : 'signup';
   const navigate = useNavigate();
+  const { state } = useApp();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -60,6 +62,14 @@ export function Auth() {
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, [cooldownUntil]);
+
+  // Navigate only once AppProvider's own state confirms the session is hydrated —
+  // not right after the raw Supabase call resolves. Navigating eagerly races
+  // against the async data pull: ProtectedRoute can see authReady=true but
+  // isAuthenticated still false for a moment and bounce straight back here.
+  useEffect(() => {
+    if (state.isAuthenticated) navigate('/dashboard', { replace: true });
+  }, [state.isAuthenticated, navigate]);
 
   function switchMode(next: 'login' | 'signup') {
     setParams({ mode: next });
@@ -99,11 +109,11 @@ export function Auth() {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (signInError) throw signInError;
       }
-      navigate('/dashboard');
+      // Success — stay in the submitting state; the effect above navigates once
+      // AppProvider finishes hydrating (this component may unmount before then).
     } catch (err) {
       if (isRateLimitError(err)) setCooldownUntil(Date.now() + COOLDOWN_MS);
       setError(friendlyAuthError(err));
-    } finally {
       setSubmitting(false);
     }
   }
@@ -127,11 +137,11 @@ export function Auth() {
         });
         if (signUpError) throw signUpError;
       }
-      navigate('/dashboard');
+      // Success — stay in the submitting state; the effect above navigates once
+      // AppProvider finishes hydrating (this component may unmount before then).
     } catch (err) {
       if (isRateLimitError(err)) setCooldownUntil(Date.now() + COOLDOWN_MS);
       setError(friendlyAuthError(err));
-    } finally {
       setSubmitting(false);
     }
   }

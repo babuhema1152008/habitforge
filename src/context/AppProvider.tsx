@@ -395,7 +395,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Auto-seed the shared demo account the first time anyone lands on it fresh.
     if (isBrandNew && email === DEMO_EMAIL) {
       const sample = createSampleState();
-      const seededUser = { ...sample.user, id: authUser.id, email };
+      const seededUser = { ...sample.user, id: authUser.id, email, name: 'Demo User' };
       try {
         await reseedRemote(authUser.id, { habits: sample.habits, logs: Object.values(sample.logs), challenges: sample.challenges });
         await supabase.from('profiles').upsert(
@@ -585,7 +585,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const sample = createSampleState();
     const userId = state.user.id;
     const email = state.user.email;
-    const seededUser = { ...sample.user, id: userId, email };
+    // Reset the *data*, not the identity — keep whatever name/avatar this user already had.
+    const seededUser = {
+      ...sample.user,
+      id: userId,
+      email,
+      name: state.user.name,
+      avatarEmoji: state.user.avatarEmoji,
+      avatarColor: state.user.avatarColor,
+    };
     await reseedRemote(userId, { habits: sample.habits, logs: Object.values(sample.logs), challenges: sample.challenges });
     await supabase
       .from('profiles')
@@ -603,7 +611,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         syncQueue: [],
       },
     });
-  }, [state.user.id, state.user.email, state.settings]);
+  }, [state.user.id, state.user.email, state.user.name, state.user.avatarEmoji, state.user.avatarColor, state.settings]);
 
   const addHabit: AppContextValue['addHabit'] = useCallback(
     (input) => {
