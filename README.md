@@ -2,7 +2,7 @@
 
 A clean, modern, production-ready habit tracking SaaS. Built with **React + TypeScript + Tailwind CSS + Framer Motion + Recharts + Supabase**, following a strict product-definition framework: one core function (mark a habit done in under 3 seconds), one reward loop (streaks, XP, levels, badges), and exactly six pages.
 
-Real accounts and data live in **Supabase** (Postgres + Auth), but the app is **offline-first**: every read renders from a local cache (`localStorage`), every mutation applies instantly and optimistically, and a background sync engine pushes queued changes to Supabase and pulls remote changes down whenever you're online. Lose your connection mid-session and the app keeps working exactly the same — see [§7](#7-offline-first-sync-architecture) for how.
+Real accounts and data live in **Supabase** (Postgres + Auth), but the app is **offline-first**: every read renders from a local cache (`localStorage`), every mutation applies instantly and optimistically, and a background sync engine pushes queued changes to Supabase and pulls remote changes down whenever you're online. Lose your connection mid-session and the app keeps working exactly the same — see [§8](#8-offline-first-sync-architecture) for how.
 
 ---
 
@@ -66,7 +66,25 @@ npm run lint      # ESLint
 
 ---
 
-## 4. Project Structure
+## 4. Deploying to Vercel
+
+The app is a static Vite build with no server-side code — Vercel just needs to build it and serve `index.html` for every route (client-side routing via React Router).
+
+1. **Push this repo to GitHub** (already done if you're reading this from the repo).
+2. **Import the project** at [vercel.com/new](https://vercel.com/new) → select the repo. Vercel auto-detects Vite (`npm run build`, output directory `dist`) — no config needed there.
+3. **Add environment variables** in Vercel → Project Settings → Environment Variables (for Production, Preview, and Development):
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+
+   Same values as your local `.env`. Vite only exposes variables prefixed `VITE_` to client code, and these are meant to be public (the anon key is safe to ship to the browser — every table is protected by RLS).
+4. **`vercel.json`** (already in the repo) adds a catch-all rewrite to `index.html`, so a hard refresh or direct link to `/dashboard`, `/calendar`, etc. doesn't 404.
+5. **Deploy.** Once you have your `*.vercel.app` URL (or a custom domain), add it in Supabase → Authentication → URL Configuration → **Site URL** / **Redirect URLs**. This matters for any email-link flow (password reset, and email confirmation if you turn "Confirm email" back on for production) — without it, links in those emails will redirect to the wrong place.
+
+No serverless functions, no build secrets beyond the two `VITE_` vars above — everything talks to Supabase directly from the browser over HTTPS.
+
+---
+
+## 5. Project Structure
 
 ```
 src/
@@ -80,7 +98,7 @@ src/
 │   ├── supabaseClient.ts     # createClient(), reads VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
 │   ├── demoAccount.ts        # Fixed credentials for the shared "Try the Demo" account
 │   ├── storage.ts            # localStorage get/set wrapper (the offline cache)
-│   ├── sync/                 # Offline-first sync engine — see §7
+│   ├── sync/                 # Offline-first sync engine — see §8
 │   │   ├── mappers.ts        # camelCase app types ⇄ snake_case DB rows
 │   │   ├── syncEngine.ts     # flush() / pullAll() / reseedRemote()
 │   │   └── merge.ts          # last-write-wins merge (pending-outbox-wins) helpers
@@ -122,7 +140,7 @@ src/
 
 ---
 
-## 5. Component Hierarchy
+## 6. Component Hierarchy
 
 ```
 main.tsx
@@ -160,7 +178,7 @@ main.tsx
 
 ---
 
-## 6. Database Schema
+## 7. Database Schema
 
 Real Postgres tables in Supabase — the full migration lives at [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql); this is a summary. Every table has Row Level Security enabled with a policy scoped to `auth.uid()`, so a user can only ever read/write their own rows.
 
@@ -240,7 +258,7 @@ CREATE TABLE achievements (
 
 ---
 
-## 7. Offline-First Sync Architecture
+## 8. Offline-First Sync Architecture
 
 The local cache is the source of truth for rendering; Supabase is the source of truth for persistence across devices. `src/lib/sync/`:
 
@@ -260,7 +278,7 @@ Wired into `AppProvider.tsx`:
 
 ---
 
-## 8. UI Wireframe Descriptions
+## 9. UI Wireframe Descriptions
 
 **Landing (`/`)** — Sticky nav (logo, theme toggle, login/signup). Hero: two-column layout with headline + CTA buttons on the left, a live-looking dashboard preview card (progress bar + 5-habit checklist) on the right. Below: 6-item feature grid, 3-card testimonial row, gradient CTA band, footer.
 
@@ -276,7 +294,7 @@ Wired into `AppProvider.tsx`:
 
 ---
 
-## 9. AI Habit Coach ("Coach Nova")
+## 10. AI Habit Coach ("Coach Nova")
 
 A rule-based motivational engine (`src/lib/coach.ts`) that reads your local habit/streak/challenge data and produces a prioritized feed of coach messages — no external API calls, fully deterministic from app state. It surfaces in two places:
 
@@ -300,7 +318,7 @@ Message types, highest priority first:
 
 ---
 
-## 10. Gamification Rules
+## 11. Gamification Rules
 
 - **XP per completion:** 10 base, +5 at a 3-day streak, +15 at 7 days, +20 at 21 days, +25 at 30 days (per habit, recalculated on every toggle).
 - **Perfect day bonus:** +30 XP once per day when 100% of that day's scheduled habits are complete (reversed if you undo down from 100%).
@@ -311,7 +329,7 @@ Message types, highest priority first:
 
 ---
 
-## 11. Sample Data
+## 12. Sample Data
 
 Selecting "Try the Demo" or leaving "Start with sample habits" checked on signup seeds:
 
@@ -324,7 +342,7 @@ See `src/lib/sampleData.ts`.
 
 ---
 
-## 12. Accessibility & States
+## 13. Accessibility & States
 
 - Every interactive control has an `aria-label`/`aria-pressed` where appropriate; modals are proper `role="dialog"` with focus-visible rings (`focus-ring` utility) and Escape-to-close.
 - Empty states (`EmptyState`), loading skeletons (`Skeleton`, `HabitCardSkeleton`), and inline form error messages (`role="alert"`) are used throughout instead of blank screens or silent failures.
